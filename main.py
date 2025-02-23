@@ -4,7 +4,7 @@ from asyncio import run
 import asyncio
 from os import getenv
 from logging import basicConfig, INFO
-from dotenv import load_dotenv
+
 from handlers.user.check_pay import check_payment
 
 from aiogram import Dispatcher, Bot
@@ -14,11 +14,11 @@ from handlers import *
 from handlers.user.history import history_router
 from handlers.user.profile import profile_router
 from handlers.user.admin import admin_router
+from bot import bot
 
 from utils.models import Users, Services, Category, PaymentsT, Stud,St_per,inv,invd, AdminUsers, StudentCourses
 
-load_dotenv()
-bot = Bot(token=getenv('BOT_TOKEN'))
+
 dp = Dispatcher()
 
 dp.include_routers(

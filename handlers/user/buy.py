@@ -105,9 +105,9 @@ async def buy_handler(callback: CallbackQuery, state: FSMContext):
     print(payment1.confirmation.confirmation_url)
     await state.update_data(payment_id=payment1.id)
     await state.set_state(Buy.payment_id)
-    await callback.message.answer(f'Для оплаты перейдите по ссылке {payment1.confirmation.confirmation_url}')
+    await callback.message.edit_text(f'Для оплаты перейдите по ссылке {payment1.confirmation.confirmation_url}')
     # db.close
-    #await callback.message.answer('Для оплаты перейдите по ссылке', reply_markup=user_show_pay_kb(payment1))
+    #await callback.message.edit_text('Для оплаты перейдите по ссылке', reply_markup=user_show_pay_kb(payment1))
 
 # @buy_router.callback_query(F.data == 'conf')
 # async def check_payment(state: FSMContext):
@@ -132,13 +132,13 @@ async def buy_handler(callback: CallbackQuery, state: FSMContext):
 
 @buy_router.pre_checkout_query(F.func(lambda query: True))
 async def pre_checkout_query_handle(event: PreCheckoutQuery):
-    await event.bot.answer_pre_checkout_query(event.id, ok=True)
+    await event.bot.edit_text_pre_checkout_query(event.id, ok=True)
 
 
 @buy_router.message(F.successful_payment)
 async def process_successful_payment(message: Message):
     paymentt: PaymentsT = PaymentsT.get_by_id(int(message.successful_payment.invoice_payload))
-    await message.answer('''✅ Спасибо!
+    await message.edit_text('''✅ Спасибо!
 Ваш платеж принят, информация направлена администратору''')
     text = f'''🆕 Платёж #{paymentt.id}
 <b>Данные о клиенте</b>

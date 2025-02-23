@@ -17,6 +17,7 @@ class ProfileEditing(StatesGroup):
     edit_email = State()
     edit_student_name = State()
     add_student = State()
+    add_student_f = State()
     add_course = State()
 
 class AdminStates(StatesGroup):

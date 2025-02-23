@@ -46,7 +46,7 @@ async def start_handler(event: Message | CallbackQuery, state: FSMContext = None
                 parse_mode="HTML"
             )
         else:
-            await event.message.answer(
+            await event.message.edit_text(
                 start_text,
                 reply_markup=main_menu(is_admin),
                 parse_mode="HTML"

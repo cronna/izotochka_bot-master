@@ -55,7 +55,7 @@ async def show_student_history(callback: CallbackQuery):
             parse_mode="HTML"
         )
     except Stud.DoesNotExist:
-        await callback.answer("❌ Ученик не найден!")
+        await callback.edit_text("❌ Ученик не найден!")
 
 @history_router.callback_query(F.data.startswith("page_"))
 async def pagination_handler(callback: CallbackQuery):
@@ -82,3 +82,11 @@ async def pagination_handler(callback: CallbackQuery):
         reply_markup=pagination_kb(page, total_pages, student_id),
         parse_mode="HTML"
     )
+
+
+@history_router.callback_query(F.data.startswith("back_to_"))
+async def handle_back_buttons(callback: CallbackQuery):
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        print(f"Ошибка при удалении сообщения: {e}")

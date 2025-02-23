@@ -14,6 +14,7 @@ from utils.keyboards import (
 import phonenumbers
 import re
 from datetime import datetime
+from bot import bot
 
 profile_router = Router()
 
@@ -28,6 +29,8 @@ async def start_edit_fullname(callback: CallbackQuery, state: FSMContext):
 @profile_router.message(ProfileEditing.edit_fullname)
 async def process_edit_fullname(message: Message, state: FSMContext):
     if len(message.text.split()) != 3:
+        await message.delete()
+        await bot.delete_message(message.from_user.id, message.message_id - 1)
         return await message.answer("❌ Неверный формат! Пример: Иванов Иван Иванович")
     
     user = Users.get(user_id=message.from_user.id)
@@ -36,6 +39,8 @@ async def process_edit_fullname(message: Message, state: FSMContext):
     
     await state.clear()
     await message.answer("✅ ФИО успешно обновлено!", reply_markup=profile_kb())
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
 
 @profile_router.callback_query(F.data == "edit_phone")
 async def start_edit_phone(callback: CallbackQuery, state: FSMContext):
@@ -52,6 +57,8 @@ async def process_edit_phone(message: Message, state: FSMContext):
         if not phonenumbers.is_valid_number(parsed):
             raise ValueError
     except:
+        await message.delete()
+        await bot.delete_message(message.from_user.id, message.message_id - 1)
         return await message.answer("❌ Неверный формат номера! Пример: +79161234567")
     
     user = Users.get(user_id=message.from_user.id)
@@ -63,6 +70,8 @@ async def process_edit_phone(message: Message, state: FSMContext):
     
     await state.clear()
     await message.answer("✅ Телефон успешно обновлен!", reply_markup=profile_kb())
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
 
 @profile_router.callback_query(F.data == "edit_email")
 async def start_edit_email(callback: CallbackQuery, state: FSMContext):
@@ -75,7 +84,9 @@ async def start_edit_email(callback: CallbackQuery, state: FSMContext):
 @profile_router.message(ProfileEditing.edit_email)
 async def process_edit_email(message: Message, state: FSMContext):
     if not re.match(r"[^@]+@[^@]+\.[^@]+", message.text):
-        return await message.answer("❌ Неверный формат email! Пример: user@example.com")
+        await message.delete()
+        await bot.delete_message(message.from_user.id, message.message_id - 1)
+        return await message.edit_text("❌ Неверный формат email! Пример: user@example.com")
     
     user = Users.get(user_id=message.from_user.id)
     user.email = message.text
@@ -83,6 +94,8 @@ async def process_edit_email(message: Message, state: FSMContext):
     
     await state.clear()
     await message.answer("✅ Email успешно обновлен!", reply_markup=profile_kb())
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
 
 @profile_router.callback_query(F.data.startswith("delete_student_"))
 async def delete_student(callback: CallbackQuery):
@@ -126,14 +139,18 @@ async def show_profile(callback: CallbackQuery):
 
 @profile_router.callback_query(F.data == 'edit_profile')
 async def edit_profile_start(callback: CallbackQuery, state: FSMContext):
-    """
-    Обработчик для начала редактирования профиля.
-    """
     await state.set_state(ProfileEditing.choose_field)
-    await callback.message.edit_text(
-        "Что вы хотите изменить?",
-        reply_markup=edit_profile_kb()
-    )
+    try:
+        await callback.message.edit_text(
+            "Что вы хотите изменить?",
+            reply_markup=edit_profile_kb()
+        )
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(
+            "Что вы хотите изменить?",
+            reply_markup=edit_profile_kb()
+        )
 
 @profile_router.callback_query(F.data == 'manage_students')
 async def manage_students(callback: CallbackQuery):
@@ -179,9 +196,11 @@ async def process_add_student(message: Message, state: FSMContext):
         )
         St_per.create(id_st=student, id_per=user)
         await state.clear()
-        await message.answer("✅ Ученик успешно добавлен!", reply_markup=profile_kb())
+        await message.edit_text("✅ Ученик успешно добавлен!", reply_markup=profile_kb())
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {str(e)}")
+        await message.edit_text(f"❌ Ошибка: {str(e)}", reply_markup=profile_kb())
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
 
 
 @profile_router.callback_query(F.data.startswith("edit_student_"))
@@ -199,9 +218,6 @@ async def edit_student_handler(callback: CallbackQuery, state: FSMContext):
 
 @profile_router.message(ProfileEditing.edit_student_name)
 async def process_edit_student(message: Message, state: FSMContext):
-    """
-    Обработчик для сохранения изменений ФИО ученика.
-    """
     data = await state.get_data()
     student_id = data["student_id"]
     student = Stud.get_by_id(student_id)
@@ -209,7 +225,20 @@ async def process_edit_student(message: Message, state: FSMContext):
     student.save()
     
     await state.clear()
-    await message.answer("✅ ФИО ученика успешно изменено!", reply_markup=profile_kb())
+    try:
+        await message.answer(
+            "✅ ФИО ученика успешно изменено!",
+            reply_markup=profile_kb()
+        )
+        
+    except Exception:
+        await message.delete()
+        await message.answer(
+            "✅ ФИО ученика успешно изменено!",
+            reply_markup=profile_kb()
+        )
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
 
 @profile_router.callback_query(F.data.startswith("delete_student_"))
 async def delete_student_handler(callback: CallbackQuery):
@@ -287,7 +316,9 @@ async def process_add_course(message: Message, state: FSMContext):
         
         await message.answer("✅ Занятие успешно добавлено!", reply_markup=profile_kb())
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {str(e)}")
+        await message.answer(f"❌ Ошибка: {str(e)}", reply_markup=profile_kb())
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
     await state.clear()
 
 
@@ -305,3 +336,11 @@ async def delete_course_handler(callback: CallbackQuery):
         "✅ Занятие успешно удалено!",
         reply_markup=profile_kb()
     )
+
+
+@profile_router.callback_query(F.data.startswith("back_to_"))
+async def handle_back_buttons(callback: CallbackQuery):
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        print(f"Ошибка при удалении сообщения: {e}")

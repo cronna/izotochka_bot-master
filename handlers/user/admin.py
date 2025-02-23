@@ -1,4 +1,4 @@
-from aiogram import F, Router
+from aiogram import F, Router, Bot
 from aiogram.types import CallbackQuery, Message, FSInputFile, PhotoSize
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
@@ -6,6 +6,8 @@ from utils.models import AdminUsers, Users, Services, Category, PaymentsT, Stud,
 from utils.states import AdminStates
 from datetime import datetime
 from aiogram.types.input_file import BufferedInputFile
+from aiogram.methods.delete_message import DeleteMessage as dm
+from bot import bot
 import csv
 from utils.keyboards import (
     admin_menu_kb,
@@ -25,7 +27,7 @@ async def check_admin(user_id: int) -> bool:
 @admin_router.callback_query(F.data == "admin")
 async def admin_panel(callback: CallbackQuery):
     if not await check_admin(callback.from_user.id):
-        return await callback.answer("🚫 Доступ запрещен!")
+        return await callback.edit_text("🚫 Доступ запрещен!")
     
     await callback.message.edit_text(
         "🛠️ Админ-панель:",
@@ -36,10 +38,17 @@ async def admin_panel(callback: CallbackQuery):
 @admin_router.callback_query(F.data == "manage_categories")
 async def manage_categories(callback: CallbackQuery):
     categories = Category.select()
-    await callback.message.edit_text(
-        "📂 Управление категориями:",
-        reply_markup=categories_manage_kb(categories)
-    )
+    try:
+        await callback.message.edit_text(
+            "📂 Управление категориями:",
+            reply_markup=categories_manage_kb(categories)
+        )
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(
+            "📂 Управление категориями:",
+            reply_markup=categories_manage_kb(categories)
+        )
 
 @admin_router.callback_query(F.data == "add_category")
 async def add_category(callback: CallbackQuery, state: FSMContext):
@@ -53,34 +62,80 @@ async def add_category(callback: CallbackQuery, state: FSMContext):
 async def process_add_category_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await state.set_state(AdminStates.add_category_photo)
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
     await message.answer("📸 Пришлите фото для категории или напишите 'Пропустить':")
 
 @admin_router.message(AdminStates.add_category_photo)
 async def process_add_category_photo(message: Message, state: FSMContext):
     data = await state.get_data()
+    current_has_photo = message.photo is not None
     
     if message.photo:
         data["image"] = message.photo[-1].file_id
     elif message.text and message.text.lower() == "пропустить":
         data["image"] = None
-    
+
     Category.create(
         name=data["name"],
         sname=data.get("sname", data["name"][:15]),
         image=data.get("image")
     )
-    
+
+    new_has_photo = data["image"] is not None
+    reply_markup = admin_menu_kb()
+    response_text = "✅ Категория добавлена!"
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
+    try:
+        if current_has_photo != new_has_photo:
+            await message.delete()
+            if new_has_photo:
+                await message.answer_photo(
+                    data["image"],
+                    caption=response_text,
+                    reply_markup=reply_markup
+                )
+            else:
+                await message.answer(
+                    response_text,
+                    reply_markup=reply_markup
+                )
+        else:
+            if new_has_photo:
+                await message.answer(
+                    caption=response_text,
+                    reply_markup=reply_markup
+                )
+            else:
+                await message.answer(
+                    response_text,
+                    reply_markup=reply_markup
+                )
+        
+    except Exception:
+        await message.answer(
+            response_text,
+            reply_markup=reply_markup
+        )
+
     await state.clear()
-    await message.answer("✅ Категория добавлена!", reply_markup=admin_menu_kb())
+    
 
 # Управление услугами
 @admin_router.callback_query(F.data == "manage_services")
 async def manage_services(callback: CallbackQuery):
-    services = Services.select().join(Category)
-    await callback.message.edit_text(
-        "💰 Управление тарифами:",
-        reply_markup=services_manage_kb(services)
-    )
+    try:
+        await callback.message.edit_text(
+            "💰 Управление тарифами:",
+            reply_markup=services_manage_kb()
+        )
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(
+            "💰 Управление тарифами:",
+            reply_markup=services_manage_kb()
+        )
 
 # Добавление услуги (последовательно)
 @admin_router.callback_query(F.data == "add_service")
@@ -95,8 +150,10 @@ async def add_service(callback: CallbackQuery, state: FSMContext):
 async def process_add_service_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await state.set_state(AdminStates.add_service_price)
+    
     await message.answer("📝 Введите цену услуги:")
-
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
 # admin.py
 @admin_router.message(AdminStates.add_service_price)
 async def process_add_service_price(message: Message, state: FSMContext):
@@ -114,9 +171,12 @@ async def process_add_service_price(message: Message, state: FSMContext):
         
         await state.set_state(AdminStates.add_service_category)
         await message.answer("📂 Выберите категорию:", reply_markup=builder.as_markup())
+        await message.delete()
+        await bot.delete_message(message.from_user.id, message.message_id - 1)
         
+
     except ValueError:
-        await message.answer("❌ Цена должна быть числом. Попробуйте снова.")
+        await message.edit_text("❌ Цена должна быть числом. Попробуйте снова.")
 
 @admin_router.callback_query(F.data.startswith("select_cat_"))
 async def process_select_category(callback: CallbackQuery, state: FSMContext):
@@ -124,33 +184,77 @@ async def process_select_category(callback: CallbackQuery, state: FSMContext):
     await state.update_data(category_id=category_id)
     await state.set_state(AdminStates.add_service_description)
     await callback.message.answer("📝 Введите описание услуги:")
+    await callback.message.delete()
+    await bot.delete_message(callback.message.from_user.id, callback.message.message_id - 1)
 
 @admin_router.message(AdminStates.add_service_description)
 async def process_add_service_description(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     await state.set_state(AdminStates.add_service_photo)
     await message.answer("📸 Пришлите фото для услуги или напишите 'Пропустить':")
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
 
 # admin.py
 @admin_router.message(AdminStates.add_service_photo)
 async def process_add_service_without_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    current_has_photo = message.photo is not None
+    
     if message.photo:
         photo_id = message.photo[-1].file_id
-        data = await state.get_data()
         data["image"] = photo_id
-        
-        Services.create(**data)
-        await state.clear()
-        await message.answer("✅ Услуга добавлена с фото!", reply_markup=admin_menu_kb())
-    # Если пользователь отправил текст "Пропустить"
     elif message.text and message.text.lower() == "пропустить":
-        data = await state.get_data()
-        Services.create(**data)
-        await state.clear()
-        await message.answer("✅ Услуга добавлена без фото!", reply_markup=admin_menu_kb())
+        data["image"] = None
+
+    Services.create(**data)
+    new_has_photo = data.get("image") is not None
+    reply_markup = admin_menu_kb()
+    response_text = "✅ Услуга добавлена!" if new_has_photo else "✅ Услуга добавлена без фото!"
+
+    try:
+        if current_has_photo != new_has_photo:
+            await message.delete()
+            if new_has_photo:
+                await message.answer_photo(
+                    data["image"],
+                    caption=response_text,
+                    reply_markup=reply_markup
+                )
+            else:
+                await message.answer(
+                    response_text,
+                    reply_markup=reply_markup
+                )
+        else:
+            if new_has_photo:
+                await message.answer(
+                    caption=response_text,
+                    reply_markup=reply_markup
+                )
+            else:
+                await message.answer(
+                    response_text,
+                    reply_markup=reply_markup
+                )
+        await message.delete()
+        await bot.delete_message(message.from_user.id, message.message_id - 1)
+    except Exception:
+        await message.answer(
+            response_text,
+            reply_markup=reply_markup
+        )
+
+    await state.clear()
 
     
-
+@admin_router.callback_query(F.data.startswith("serv_page_"))
+async def handle_services_pagination(callback: CallbackQuery):
+    page = int(callback.data.split("_")[-1])
+    await callback.message.edit_reply_markup(
+        reply_markup=services_manage_kb(page=page)
+    )
+    await callback.answer()
     
 
 # Редактирование услуги
@@ -160,15 +264,28 @@ async def edit_service_start(callback: CallbackQuery, state: FSMContext):
     service = Services.get_by_id(service_id)
     await state.update_data(service_id=service_id)
     await state.set_state(AdminStates.edit_service)
-    await callback.message.edit_text(
-        f"✏️ Редактирование услуги:\n\n"
-        f"Название: {service.name}\n"
-        f"Цена: {service.price}р\n"
-        f"Категория: {service.category.name}\n"
-        f"Описание: {service.description}\n\n"
-        "Выберите действие:",
-        reply_markup=edit_service_kb(service_id)
-    )
+    
+    try:
+        await callback.message.edit_text(
+            f"✏️ Редактирование услуги:\n\n"
+            f"Название: {service.name}\n"
+            f"Цена: {service.price}р\n"
+            f"Категория: {service.category.name}\n"
+            f"Описание: {service.description}\n\n"
+            "Выберите действие:",
+            reply_markup=edit_service_kb(service_id)
+        )
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(
+            f"✏️ Редактирование услуги:\n\n"
+            f"Название: {service.name}\n"
+            f"Цена: {service.price}р\n"
+            f"Категория: {service.category.name}\n"
+            f"Описание: {service.description}\n\n"
+            "Выберите действие:",
+            reply_markup=edit_service_kb(service_id)
+        )
 
 @admin_router.callback_query(F.data.startswith("update_srv_"))
 async def update_service_field(callback: CallbackQuery, state: FSMContext):
@@ -198,14 +315,18 @@ async def process_update_service(message: Message, state: FSMContext):
     
     service.save()
     await state.clear()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
     await message.answer("✅ Услуга обновлена!", reply_markup=admin_menu_kb())
+    await message.delete()
+    
+    
 
 @admin_router.callback_query(F.data.startswith("delete_srv_"))
 async def delete_service(callback: CallbackQuery):
     service_id = int(callback.data.split("_")[2])
     service = Services.get_by_id(service_id)
     service.delete_instance()
-    await callback.message.edit_text(
+    await callback.message.answer(
         "✅ Услуга удалена!",
         reply_markup=admin_menu_kb()
     )
@@ -228,10 +349,10 @@ async def export_users_txt(callback: CallbackQuery):
                         file.write(f" - {student.fullname}\n")
                 file.write("\n" + "="*50 + "\n")
         
-        await callback.message.answer_document(BufferedInputFile.from_file("users.txt", filename="users.txt"))
-        await callback.answer("✅ Экспорт завершен!")
+        await callback.message.edit_text_document(BufferedInputFile.from_file("users.txt", filename="users.txt"))
+        await callback.edit_text("✅ Экспорт завершен!")
     except Exception as e:
-        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+        await callback.message.edit_text(f"❌ Ошибка: {str(e)}")
 
 @admin_router.callback_query(F.data == "export_payments_txt")
 async def export_payments_txt(callback: CallbackQuery):
@@ -246,10 +367,10 @@ async def export_payments_txt(callback: CallbackQuery):
                 file.write(f"Пользователь: {p.user.fullname}\n")
                 file.write("\n" + "-"*50 + "\n")
         
-        await callback.message.answer_document(BufferedInputFile.from_file("payments.txt", filename="payments.txt"))
-        await callback.answer("✅ Экспорт завершен!")
+        await callback.message.edit_text_document(BufferedInputFile.from_file("payments.txt", filename="payments.txt"))
+        await callback.edit_text("✅ Экспорт завершен!")
     except Exception as e:
-        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+        await callback.message.edit_text(f"❌ Ошибка: {str(e)}")
 
 # Рассылка
 @admin_router.callback_query(F.data == "broadcast")
@@ -282,6 +403,8 @@ async def process_broadcast(message: Message, state: FSMContext):
         f"Не удалось: {failed}",
         reply_markup=admin_menu_kb()
     )
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
     await state.clear()
 
 @admin_router.callback_query(F.data == "stats")
@@ -311,13 +434,15 @@ async def process_stats(message: Message, state: FSMContext):
         
         total_amount = sum(p.price for p in payments)
         total_count = payments.count()
-        
+        await bot.delete_message(message.from_user.id, message.message_id - 1)
         await message.answer(
             f"📊 Статистика за период {start_date.date()} - {end_date.date()}:\n\n"
             f"💰 Общая сумма: {total_amount}р\n"
             f"📄 Количество платежей: {total_count}",
             reply_markup=admin_menu_kb()
         )
+        await message.delete()
+        
     except ValueError:
         await message.answer("❌ Неверный формат даты! Пример: 2024-01-01 2024-12-31")
     except Exception as e:
@@ -326,7 +451,7 @@ async def process_stats(message: Message, state: FSMContext):
         await state.clear()
 
 
-@admin_router.callback_query(F.data == "export_data")
+
 @admin_router.callback_query(F.data == "export_data")
 async def export_data_menu(callback: CallbackQuery):
     """
@@ -357,9 +482,10 @@ async def export_users(callback: CallbackQuery):
         
         # Отправляем файл пользователю
         await callback.message.answer_document(FSInputFile("users.csv"))
-        await callback.answer("✅ Экспорт завершен!")
+        await callback.message.delete()
+        await callback.message.answer("✅ Экспорт завершен!", reply_markup=admin_menu_kb())
     except Exception as e:
-        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+        await callback.message.edit_text(f"❌ Ошибка: {str(e)}")
 
 @admin_router.callback_query(F.data == "export_payments")
 async def export_payments(callback: CallbackQuery):
@@ -382,9 +508,10 @@ async def export_payments(callback: CallbackQuery):
         
         # Отправляем файл пользователю
         await callback.message.answer_document(FSInputFile("payments.csv"))
-        await callback.answer("✅ Экспорт завершен!")
+        await callback.message.delete()
+        await callback.message.answer("✅ Экспорт завершен!", reply_markup=admin_menu_kb())
     except Exception as e:
-        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+        await callback.message.edit_text(f"❌ Ошибка: {str(e)}")
 
 
 @admin_router.callback_query(F.data == "manage_admins")
@@ -410,38 +537,64 @@ async def manage_admins(callback: CallbackQuery):
 async def add_admin_handler(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.add_admin)
     await callback.message.edit_text(
-        "Введите ID пользователя для назначения админом:",
+        "Введите USER_ID пользователя для назначения админом:",
         reply_markup=back_to_admin_kb()
     )
 
 @admin_router.message(AdminStates.add_admin)
 async def process_add_admin(message: Message, state: FSMContext):
     try:
-        user_id = int(message.text)
-        AdminUsers.create(user_id=user_id)
-        await message.answer("✅ Админ успешно добавлен!")
+        user_id = str(message.text.strip())
+        user = Users.get(Users.user_id == user_id)
+        
+        # Обновляем статус админа
+        user.is_admin = True
+        user.save()
+        
+        await message.answer("✅ Пользователь успешно назначен администратором!", reply_markup=admin_menu_kb)
+        await message.delete()
+        await bot.delete_message(message.from_user.id, message.message_id - 1)
+
+        
+        
+    except Users.DoesNotExist:
+        await message.answer("❌ Пользователь с таким USER_ID не найден!", reply_markup=admin_menu_kb())
+    except ValueError:
+        await message.answer("❌ Неверный формат USER_ID!", reply_markup=admin_menu_kb())
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {str(e)}")
+        await message.answer(f"❌ Ошибка: {str(e)}", reply_markup=admin_menu_kb())
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
     await state.clear()
 
 
 @admin_router.callback_query(F.data.startswith("edit_cat_"))
 async def edit_category_handler(callback: CallbackQuery, state: FSMContext):
     try:
-        category_id = int(callback.data.split("_")[2])  # Исправлен индекс
+        category_id = int(callback.data.split("_")[2])
         category = Category.get_by_id(category_id)
         await state.update_data(category_id=category_id)
         await state.set_state(AdminStates.edit_category)
         
-        await callback.message.edit_text(
-            f"✏️ Редактирование категории:\n\n"
-            f"Название: {category.name}\n"
-            f"Сокращенное название: {category.sname}\n\n"
-            "Выберите действие:",
-            reply_markup=edit_category_kb(category_id)  # Использование новой клавиатуры
-        )
+        try:
+            await callback.message.edit_text(
+                f"✏️ Редактирование категории:\n\n"
+                f"Название: {category.name}\n"
+                f"Сокращенное название: {category.sname}\n\n"
+                "Выберите действие:",
+                reply_markup=edit_category_kb(category_id)
+            )
+        except Exception:
+            await callback.message.delete()
+            await callback.message.answer(
+                f"✏️ Редактирование категории:\n\n"
+                f"Название: {category.name}\n"
+                f"Сокращенное название: {category.sname}\n\n"
+                "Выберите действие:",
+                reply_markup=edit_category_kb(category_id)
+            )
     except (IndexError, Category.DoesNotExist):
-        await callback.answer("❌ Категория не найдена!")
+        await callback.edit_text("❌ Категория не найдена!")
 
 @admin_router.callback_query(F.data.startswith("update_cat_name_"))
 async def update_category_name_handler(callback: CallbackQuery, state: FSMContext):
@@ -455,6 +608,7 @@ async def update_category_name_handler(callback: CallbackQuery, state: FSMContex
         "✏️ Введите новое название категории:",
         reply_markup=back_to_admin_kb()
     )
+    
 
 @admin_router.message(AdminStates.edit_category_name)
 async def process_update_category_name(message: Message, state: FSMContext):
@@ -469,6 +623,8 @@ async def process_update_category_name(message: Message, state: FSMContext):
     
     await state.clear()
     await message.answer("✅ Название категории успешно изменено!", reply_markup=admin_menu_kb())
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
 
 @admin_router.callback_query(F.data.startswith("update_cat_sname_"))
 async def update_category_sname_handler(callback: CallbackQuery, state: FSMContext):
@@ -517,10 +673,12 @@ async def update_category_photo_handler(callback: CallbackQuery, state: FSMConte
     category_id = int(callback.data.split("_")[3])
     await state.update_data(category_id=category_id)
     await state.set_state(AdminStates.edit_category_photo)
-    await callback.message.edit_text(
+    await callback.message.answer(
         "📸 Пришлите новое фото для категории или напишите 'Пропустить':",
         reply_markup=back_to_admin_kb()
     )
+    await callback.message.delete()
+    await bot.delete_message(callback.message.from_user.id, callback.message.message_id - 1)
 
 @admin_router.message(AdminStates.edit_category_photo)
 async def process_update_category_photo(message: Message, state: FSMContext):
@@ -536,3 +694,22 @@ async def process_update_category_photo(message: Message, state: FSMContext):
     category.save()
     await state.clear()
     await message.answer("✅ Фото категории успешно обновлено!", reply_markup=admin_menu_kb())
+    await message.delete()
+    await bot.delete_message(message.from_user.id, message.message_id - 1)
+
+
+@admin_router.callback_query(F.data == "manage_services")
+async def manage_services(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "💰 Управление тарифами (сгруппировано по категориям):",
+        reply_markup=services_manage_kb()  # Используем новую клавиатуру
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("back_to_"))
+async def handle_back_buttons(callback: CallbackQuery):
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        print(f"Ошибка при удалении сообщения: {e}")

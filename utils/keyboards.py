@@ -46,7 +46,7 @@ def services_kb(services: list[Services], columns: int = 2) -> InlineKeyboardMar
         builder.button(text=f'{service.name} - {service.price}р', callback_data=f'show_service_info {service.id}')
     
     builder.adjust(columns)  # Используем переданное значение или значение по умолчанию (2)
-    builder.row(InlineKeyboardButton(text='↩️ Назад', callback_data='show_categories'))
+    builder.row(InlineKeyboardButton(text='↩️ Назад', callback_data='back_to_show_categories'))
     return builder.as_markup()
 
 
@@ -68,7 +68,7 @@ def user_show_service_kb(service: Services, user_id: int) -> InlineKeyboardMarku
                 builder.button(text=stud.fullname, callback_data=f'buy {service.id} {stud.id}')
     
     builder.button(text='➕ Добавить ученика', callback_data=f'addst {service.id}')
-    builder.button(text='↩️ Назад', callback_data='start')
+    builder.button(text='↩️ Назад', callback_data='back_to_start')
     return builder.adjust(2).as_markup()
 
 
@@ -246,6 +246,64 @@ def edit_service_kb(service_id: int) -> InlineKeyboardMarkup:
     builder.button(text="↩️ Назад", callback_data="manage_services")
     return builder.adjust(1).as_markup()
 
+def services_manage_kb(page: int = 1, per_page: int = 3) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    query = Category.select().where(Category.is_del == 0).order_by(Category.sortkey)
+    total_items = query.count()
+    total_pages = (total_items + per_page - 1) // per_page
+    categories = query.paginate(page, per_page)
+
+    for category in categories:
+        builder.button(
+            text=f"📂 {category.name}",
+            callback_data=f"category_{category.id}"
+        )
+        
+        services = Services.select().where(
+            (Services.category == category) &
+            (Services.is_del == 0)
+        ).order_by(Services.sortkey)
+        
+        for service in services:
+            builder.button(
+                text=f"→ {service.name} ({service.price}р)", 
+                callback_data=f"edit_srv_{service.id}"
+            ).adjust(1)
+
+    if total_pages > 1:
+        pagination_buttons = []
+        if page > 1:
+            pagination_buttons.append(InlineKeyboardButton(
+                text="◀️", 
+                callback_data=f"serv_page_{page-1}"
+            ))
+        
+        pagination_buttons.append(InlineKeyboardButton(
+            text=f"{page}/{total_pages}", 
+            callback_data="current_page"
+        ))
+        
+        if page < total_pages:
+            pagination_buttons.append(InlineKeyboardButton(
+                text="▶️", 
+                callback_data=f"serv_page_{page+1}"
+            ))
+        
+        builder.row(*pagination_buttons)
+
+    builder.row(
+        InlineKeyboardButton(
+            text="➕ Создать услугу",
+            callback_data="add_service"
+        ),
+        InlineKeyboardButton(
+            text="↩️ Назад",
+            callback_data="admin"
+        )
+    )
+    
+    return builder.as_markup()
+
 def back_to_admin_kb() -> InlineKeyboardMarkup:
     """
     Клавиатура для возврата в админ-меню.
@@ -275,7 +333,7 @@ def categories_manage_kb(categories: list[Category]) -> InlineKeyboardMarkup:
         builder.button(text=f"{cat.name} ({cat.id})", callback_data=f"edit_cat_{cat.id}")
     builder.button(text="➕ Добавить", callback_data="add_category")
     builder.button(text="↩️ Назад", callback_data="admin")
-    return builder.adjust(1).as_markup()
+    return builder.adjust(3).as_markup()
 
 
 def categories_select_kb(categories: list[Category]) -> InlineKeyboardMarkup:
